@@ -1,0 +1,33 @@
+#!/bin/bash
+# shellcheck disable=2034
+# ZSH Plugin
+# Author: Aaron Lesmeister
+# Date: 2023-12-20
+# File: recon-extdns
+# Purpose: Discover FQDNs using subfinder and dnsx.
+# Data Format: N/A
+
+E="$(tput setaf 7)[$(tput setaf 9)!$(tput setaf 7)]$(tput sgr0)"
+P="$(tput setaf 7)[$(tput setaf 10)+$(tput setaf 7)]$(tput sgr0)"
+W="$(tput setaf 7)[$(tput setaf 11)?$(tput setaf 7)]$(tput sgr0)"
+I="$(tput setaf 7)[$(tput setaf 12)*$(tput setaf 7)]$(tput sgr0)"
+NOW=$(date +"%m-%d-%Y %H%M")
+
+PURPOSE="Discover FQDNs using subfinder and dnsx."
+USAGE="recon-extdns DOMAIN.TLD"
+
+DOM="$1"
+OUTRAW="$1""_subf.resolved"
+OUTCSV="$OUTRAW"".csv"
+IPPAT='([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})(:[0-9]{1,5})?'
+
+if [[ "$1" == "" || "$1" == "help" || "$1" == "h" ]]; then
+	printf "%s\n" "$PURPOSE"
+	printf "Usage: %s\n" "$USAGE"
+else
+	printf "%s Beginning enumeration on \"%s\" at %s.\n" "$P" "$DOM" "$NOW"
+	subfinder -silent -d "$DOM" | dnsx -silent -a -resp | ansi2txt >> "$OUTRAW"
+	awk -F' ' '{print $3","$1}' "$OUTRAW" | sed -E 's/\[|\]//g' >> "$OUTCSV"
+	NOW=$(date +"%m-%d-%Y %H%M")
+	printf "%s Finished at %s.\n" "$P" "$NOW"
+fi

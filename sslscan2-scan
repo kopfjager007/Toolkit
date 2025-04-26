@@ -1,0 +1,133 @@
+#!/bin/bash
+# ZSH Plugin
+# Author: Aaron Lesmeister
+# Date: 2022-11.22
+# File: sslscan-scan
+# Purpose: Loop sslscan over targets file then clean up the resulting reports. 
+# Data Format: Target file: List of targets, one per line.
+#
+
+version="1.0.0"
+
+F="$(tput setaf 7)$(tput bold)[$(tput setaf 1)!$(tput setaf 7)]$(tput sgr0)"
+P="$(tput setaf 7)$(tput bold)[$(tput setaf 2)+$(tput setaf 7)]$(tput sgr0)"
+W="$(tput setaf 7)$(tput bold)[$(tput setaf 3)?$(tput setaf 7)]$(tput sgr0)"
+I="$(tput setaf 7)$(tput bold)[$(tput setaf 12)*$(tput setaf 7)]$(tput sgr0)"
+
+CWD=`pwd`
+LOGFILE_BASE="ssl-$(date +"%m%d%Y-%H%M")"
+
+# Proto Setup Variable
+PROTO=""
+# Proto Setup
+FTP="--starttls-ftp"
+IMAP="--starttls-imap"
+IRC="--starttls-irc"
+LDAP="--starttls-ldap"
+MYSQL="--starttls-mysql"
+POP3="--starttls-pop3"
+PSQL="--starttls-psql"
+SMTP="--starttls-smtp"
+XMPP="--starttls-xmpp"
+RDP="--rdp"
+
+PURPOSE="Loop SSLScan2 Over Targets File"
+USAGE="sslscan-scan TARGET_FILE"
+DATA_FORMAT="Target file: List of IP:PORT[,<SNI_NAME>], one per line. (e.g. 12.13.14.15:443[,www.client.tld])"
+
+if [[ "$1" == "" || "$1" == "help" || "$1" == "h" ]]; then
+	echo "$PURPOSE"
+	echo "Data Format: $DATA_FORMAT"
+	echo "Usage: $USAGE"
+else
+	tgtfile=$1
+
+	# Checks
+	if ! which sslscan2 >/dev/null ; then
+		printf "%s sslscan2 is not installed or was not found!\n" "$F"
+		exit 1
+	fi
+	if which parse-sslscan2 >/dev/null ; then
+		PARSER="parse-sslscan2"
+	elif which parse-sslscan2.py >/dev/null; then
+		# Appliance
+		PARSER="parse-sslscan2.py"
+	else
+		printf "%s parse-sslscan2 parser not found! Results will not be parsed.\n" "$W"
+	fi
+	if [ ! -f ${tgtfile} ]; then
+		printf "%s Target file not found!\n" "$F"
+		exit 1
+	fi
+
+	# Mkdir 
+	if [ ! -d ssl ]; then
+		mkdir ssl
+	fi
+
+	# Start Logfile
+	echo -e "# SSLSCAN2 LOGFILE : Started at $(date)\n" >> $LOGFILE_BASE.log
+	# Run SSLScan2
+	for target in $(cat ${tgtfile}); do
+		# 'touch pause' in CWD to pause execution if needed.
+		while [[ -f pause ]]; do
+			DATE=`date`
+			printf "%s Paused at ${DATE}\n" "$I"
+			sleep 30
+		done
+		port=$(echo $target | awk -F':' '{print $2}' | cut -d, -f1)
+		host_port=$(echo $target | cut -d, -f1) # added v1.1.0
+
+		# Check port and add protocol setup, if necessary.
+		if [ "$port" == "21" ] || [ "$port" == "989" ] || [ "$port" == "990" ]; then 
+			PROTO="$FTP"
+		elif [ "$port" == "143" ] || [ "$port" == "993" ]; then
+			PROTO="$IMAP"
+		elif [ "$port" == "6679" ] || [ "$port" == "6697" ]; then
+			PROTO="$IRC"
+		elif [ "$port" == "636" ] || [ "$port" == "3269" ]; then
+			PROTO="$LDAP"
+		elif [ "$port" == "3306" ]; then
+			PROTO="$MYSQL"
+		elif [ "$port" == "110" ] || [ "$port" == "995" ]; then
+			PROTO="$POP3"
+		elif [ "$port" == "5432" ]; then
+			PROTO="$PSQL"
+		elif [ "$port" == "25" ] || [ "$port" == "465" ] || [ "$port" == "587" ]; then
+			PROTO="$SMTP"
+		elif [ "$port" == "5222" ] || [ "$port" == "5223" ] || [ "$port" == "5269" ] || [ "$port" == "5280" ] || [ "$port" == "5281" ] || [ "$port" == "5298" ]; then
+			PROTO="$XMPP"
+		elif [ "$port" == "3389" ]; then
+			PROTO="$RDP"
+		else
+			PROTO=""
+		fi
+
+		# v1.1.0 SNI Name Check for input file.
+		if [ $(echo $target|grep -c ',') -eq 0 ]; then
+			sni=""
+		else
+			sni="--sni-name=$(echo $target|cut -d, -f2)"
+		fi
+
+		fname=$(echo $target | sed -E 's/(:|,)/_/g') # Files will be "12.13.14.15_PORT_SNINAME" 
+		command="sslscan2 $PROTO --connect-timeout=60 --no-heartbleed $sni --xml=ssl/$fname.xml $host_port"
+		echo -e "## Target: $target\n##Start: $(date)\n## Command: $command" >> $LOGFILE_BASE.log
+		sslscan2 $PROTO --connect-timeout=60 --no-heartbleed $sni --xml=ssl/$fname.xml $host_port | tee -a $LOGFILE_BASE.log
+		echo -e "## End: $(date)\n\n" >> $LOGFILE_BASE.log
+	done
+	echo -e "# Scan Ended at $(date)\n" >> $LOGFILE_BASE.log
+
+	# Parse XML Files
+	printf "\n%s Parsing XML output files with parse-sslscan2...\n" "$P"
+	cd ssl
+	for outfile in $(ls *.xml); do
+		csv=$(echo $outfile | awk -F'.xml' '{print $1}')
+		$PARSER -i $outfile -w $csv.csv
+	done
+	# Column Header
+	echo "IP Address,Host Name,Service,Details,Vulnerability" > ../reporting-$LOGFILE_BASE.csv
+	cat *.csv | grep -v 'IP Address' >> ../reporting-$LOGFILE_BASE.csv
+
+	printf "%s Done\n" "$P"
+fi

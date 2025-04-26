@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+#
+# Author: Aaron Lesmeister
+# Date: 2022.12.18
+# Purpose: Convert an IP address ranges to CIDRs
+#
+# https://pypi.org/project/netaddr/
+# https://netaddr.readthedocs.io/en/latest/api.html?highlight=iprange_to_cidr#netaddr.iprange_to_cidrs
+# 
+
+import sys
+import netaddr
+
+INFILE = open(sys.argv[1], 'r')
+RANGES = INFILE.readlines()
+
+for range in RANGES:
+    #print("Range: " + range)
+    myrange = range.split("-")
+    start = myrange[0].rstrip()
+    stop = myrange[1].lstrip()
+    cidrs = netaddr.iprange_to_cidrs(start, stop)
+    for cidr in cidrs:
+        print(cidr)

@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+# Date: 02-13-2024
+# Author: Aaron Lesmeister
+# Borrowed from NTLMRecon https://github.com/pwnfoo/NTLMRecon/blob/master/src/ntlmrecon/ntlmutil.py
+# Purpose: For decoding NTLM SSP responses captured with mitmproxy or other intercepting proxies.
+#
+
+import sys
+import base64
+import struct
+import string
+import collections
+from random import choice
+import json
+from termcolor import colored
+from colorama import init
+import sys
+import argparse
+
+__version__="1.0"
+VALID_CHRS = set(string.ascii_letters + string.digits + string.punctuation)
+
+def clean_str(st):
+    return ''.join((s if s in VALID_CHRS else '?') for s in st)
+
+
+class StrStruct(object):
+    def __init__(self, pos_tup, raw):
+        length, alloc, offset = pos_tup
+        self.length = length
+        self.alloc = alloc
+        self.offset = offset
+        self.raw = raw[offset:offset + length]
+        self.utf16 = False
+
+        if len(self.raw) >= 2 and self.raw[1] == '\0':
+            self.string = self.raw.decode('utf-16')
+            self.utf16 = True
+        else:
+            self.string = self.raw
+
+    def __str__(self):
+        st = "%s'%s' [%s] (%db @%d)" % ('u' if self.utf16 else '',
+                                        clean_str(self.string),
+                                        self.raw,
+                                        self.length, self.offset)
+        if self.alloc != self.length:
+            st += " alloc: %d" % self.alloc
+        return st
+
+
+msg_types = collections.defaultdict(lambda: "UNKNOWN")
+msg_types[1] = "Request"
+msg_types[2] = "Challenge"
+msg_types[3] = "Response"
+
+target_field_types = collections.defaultdict(lambda: "UNKNOWN")
+target_field_types[0] = "TERMINATOR"
+target_field_types[1] = "Server name"
+target_field_types[2] = "AD domain name"
+target_field_types[3] = "FQDN"
+target_field_types[4] = "DNS domain name"
+target_field_types[5] = "Parent DNS domain"
+
+def decode_ntlm_str(st_raw):
+    try:
+        st = base64.b64decode(st_raw)
+    except Exception as e:
+        print("Input is not a valid base64-encoded string")
+        return
+    if st[:7] == b"NTLMSSP":
+        pass
+    else:
+        print("Decode failed. NTLMSSP header not found at start of input string")
+        return False
+
+    return get_server_details(st)
+
+def opt_str_struct(name, st, offset):
+    nxt = st[offset:offset + 8]
+    if len(nxt) == 8:
+        hdr_tup = struct.unpack("<hhi", nxt)
+        print("%s: %s" % (name, StrStruct(hdr_tup, st)))
+    else:
+        print("%s: [omitted]" % name)
+
+def get_server_details(st):
+    nxt = st[40:48]
+    if len(nxt) == 8:
+        hdr_tup = struct.unpack("<hhi", nxt)
+        tgt = StrStruct(hdr_tup, st)
+        raw = tgt.raw
+        pos = 0
+        parsed_data = dict()
+        while pos + 4 < len(raw):
+            rec_hdr = struct.unpack("<hh", raw[pos: pos + 4])
+            rec_type_id = rec_hdr[0]
+            rec_type = target_field_types[rec_type_id]
+            rec_sz = rec_hdr[1]
+            subst = raw[pos + 4: pos + 4 + rec_sz]
+            parsed_data[rec_type] = subst.decode('utf-8', errors="ignore").replace("\x00", '')
+            pos += 4 + rec_sz
+
+        return parsed_data
+
+def gather_ntlm_info(ntlm_string):
+    server_details = decode_ntlm_str(ntlm_string)
+
+    # Print each item in the dict
+    for key, value in server_details.items():
+        print(f"{key}: {value}")
+
+    
+if __name__ == "__main__":
+    p = argparse.ArgumentParser(description='Parse NTLM SSP Response from WWW-Authenticate header and return information.')
+    p.add_argument('-i', help="NTLM SSP Response (e.g. TlRMTVNTUAACAAAA....)", required=True)
+    
+    args = p.parse_args()
+
+    if args.i != "":
+        try:
+            gather_ntlm_info(args.i)
+        except argparse.ArgumentError:
+            p.print_help()
+

@@ -1,0 +1,33 @@
+#!/bin/bash
+# shellcheck disable=2034
+# ZSH Plugin
+# Author: Aaron Lesmeister
+# Date: 2024-08-05
+# File: randpass
+# Purpose: Print a simple random password for exploit/post-exploit.
+# Data Format: N/A
+
+E="$(tput setaf 7)[$(tput setaf 9)!$(tput setaf 7)]$(tput sgr0)"
+P="$(tput setaf 7)[$(tput setaf 10)+$(tput setaf 7)]$(tput sgr0)"
+W="$(tput setaf 7)[$(tput setaf 11)?$(tput setaf 7)]$(tput sgr0)"
+I="$(tput setaf 7)[$(tput setaf 12)*$(tput setaf 7)]$(tput sgr0)"
+NOW=$(date +"%m-%d-%Y %H%M")
+
+PURPOSE="Print a simple random password."
+USAGE="randpass [INT] (default length:12)"
+
+len=""
+re='^[0-9]+$'
+
+
+if [[ $1 =~ $re ]] || [ "$1" == "" ]; then
+	if [ "$1" == "" ]; then
+        len="12"
+    else
+        len="$1"
+    fi
+    < /dev/urandom tr -dc _A-Z-a-z-0-9 | head -c${1:-$len};echo;
+else
+	printf "%s\n" "$PURPOSE"
+	printf "Usage: %s\n" "$USAGE"
+fi

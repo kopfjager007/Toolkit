@@ -1,0 +1,121 @@
+#!/bin/bash
+# Author: Aaron Lesmeister
+# Purpose: Run ike-scan against all possible transforms.
+#   Used when ike-scan returns "NO PROPOSAL CHOSEN" error.
+#
+# Adapted from www.nta-monitor.com/wiki/index.php/Ike-scan_User_Guide
+
+########################################
+# Global Variables
+########################################
+# IP RegEx
+IPREG='([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})(:[0-9]{1,5})?'
+# Encryption algorithms (Common: 1 5 7/128 7/192 7/256)
+ENCLIST="1 5 7/128 7/192 7/256 2 3 4 6 8"
+# Hash algorithms (Common: 1 2)
+HASHLIST="1 2 3 4 5 6"
+# Authentication methods (Common: 1 3 64221 65001)
+AUTHLIST="1 3 64221 65001"
+# Diffie-Hellman groups (Common: 1 2 5)
+DHGROUP="1 2 5 14 15 16 17 18"
+# Target
+TGT=$1
+# A single group or a file for ike-scan --id=
+if [ -z $2 ]; then
+   VPNGROUP="vpngroup"
+else
+   VPNGROUP=$2
+fi
+# VPNGROUP check
+IS_FILE="FALSE"
+# Stop when found
+FOUND=0
+# Output Colors
+P="$(tput setaf 7)[$(tput setaf 10)+$(tput setaf 7)]$(tput sgr0)"
+E="$(tput setaf 7)[$(tput setaf 9)!$(tput setaf 7)]$(tput sgr0)"
+W="$(tput setaf 7)[$(tput setaf 11)?$(tput setaf 7)]$(tput sgr0)"
+# Time
+NOW=$(date +"%m-%d-%Y %H%M")
+########################################
+
+help (){
+   printf "~~ Ike-Scan Transforms ~~\n"
+   printf "  Usage: ike-scan-tr <TARGET_IP> [SINGLE GROUP ID | FILE OF GROUPS]\n"
+   printf "   Info: Group IDs can be obtained from the SSLVPN or using Ike-Force.\n"
+   exit 0
+}
+
+scan () {
+   printf "%s Started (%s)\n" "$P" "$NOW"
+   if [ -z "$VPNGROUP" ]; then
+      # If grouplist is omitted, set an arbitrary value.
+      VPNGROUP="vpngroup"
+      IS_FILE="FALSE"
+   elif [ -f "$VPNGROUP" ]; then
+      # If grouplist is a file we'll need to iterate over the list
+      IS_FILE="TRUE"
+   else
+      # If the user supplied a single group name
+      VPNGROUP="$VPNGROUP"
+      IS_FILE="FALSE"
+   fi
+   printf "%s Testing transforms against %s...\n" "$P" "$TGT"
+   if [ "$IS_FILE" == "FALSE" ]; then
+      for ENC in $ENCLIST; do
+         for HASH in $HASHLIST; do
+            for AUTH in $AUTHLIST; do
+               for DHG in $DHGROUP; do
+                  #printf "%s Trying transform \"%s,%s,%s,%s\"\n" "$P" "$ENC" "$HASH" "$AUTH" "$DHG"
+                  if sudo authbind --deep ike-scan $TGT -M -A --id=$VPNGROUP -Pike-$TGT\_$VPNGROUP.key --trans=$ENC,$HASH,$AUTH,$DHG | grep '1 returned handshake' >/dev/null ; then
+                     TRANS="$ENC,$HASH,$AUTH,$DHG"
+                     printf "%s IKE Aggressive Mode PSK Returned using Transform: \"%s\".\n" "$P" "$TRANS"
+                     printf "%s Key saved to \"ike-%s_%s.key\".\n" "$P" "$TGT" "$VPNGROUP"
+                     FOUND=1
+                     exit 0
+                  fi
+               done
+            done
+         done
+      done
+      if [ $FOUND -eq 0 ]; then
+         printf "%s No valid transforms found for %s.\n" "$E" "$TGT"
+         exit 0
+      fi
+   else
+      for ENC in $ENCLIST; do
+         for HASH in $HASHLIST; do
+            for AUTH in $AUTHLIST; do
+               for DHG in $DHGROUP; do
+                  #printf "%s Trying transform \"%s,%s,%s,%s\"\n" "$P" "$ENC" "$HASH" "$AUTH" "$DHG"
+                  if sudo authbind --deep ike-scan $TGT -M -A --id=vpngroup -Pike-$TGT\_vpngroup.key --trans=$ENC,$HASH,$AUTH,$DHG | grep '1 returned handshake' >/dev/null ; then
+                     TRANS="$ENC,$HASH,$AUTH,$DHG"
+                     printf "%s IKE Aggressive Mode PSK Returned using Transform: \"%s\".\n" "$P" "$TRANS"
+                     printf "%s Key saved to \"ike-%s.key\".\n" "$P" "$TGT"
+                     printf "%s Preparing to iterate over VPN Group List \"%s\"...\n" "$P" "$VPNGROUP"
+                     sleep 5
+                     while read -r group ; do
+                        if sudo authbind --deep ike-scan $TGT -M -A --id=$group -Pike-$TGT\_$group.key --trans=$TRANS | grep '1 returned handshake' >/dev/null ; then
+                           printf "%s IKE Aggressive Mode PSK Returned using Transform: \"%s\".\n" "$P" "$TRANS"
+                           printf "%s Key saved to \"ike-%s_%s.key\".\n" "$P" "$TGT" "$group"
+                        fi
+                     done < $VPNGROUP
+                     FOUND=1
+                     exit 0
+                  fi
+               done
+            done
+         done
+      done
+      if [ $FOUND -eq 0 ]; then
+         printf "%s No valid transforms found for %s.\n" "$E" "$TGT"
+         exit 0
+      fi
+   fi
+}
+
+# Main
+if [ $# -lt 1 ]; then
+   help 
+else
+   scan
+fi

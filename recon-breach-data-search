@@ -1,0 +1,63 @@
+#!/bin/bash
+# ZSH Plugin
+# Author: Aaron Lesmeister
+# Date: 2020-03-09
+# File: recon-breach-data-search
+
+## Globals
+CWD="$(pwd)"
+BCDATADIR='/PATH/TO/data/BreachCompilation'
+COLDATADIR='/PATH/TO/data/col15'
+COMBDATADIR='/PATH/TO/data/COMB'
+CLIENT_DOM="$1"
+OUT_DIR="$CWD/bcdata"
+BCRAW_OUT="$OUT_DIR/bc-data-$CLIENT_DOM-raw"
+PASS_LIST_WC="$OUT_DIR/passwords-with-count-$CLIENT_DOM.txt"
+PASS_LIST_SU="$OUT_DIR/passwords-sortU-$CLIENT_DOM.txt"
+PASS_RPT="$OUT_DIR/breach-data-$CLIENT_DOM.tsv"
+EMAIL_FILE="$OUT_DIR/userlist-bc-emails-$CLIENT_DOM.txt"
+USER_FILE="$OUT_DIR/userlist-bc-usernames-$CLIENT_DOM.txt"
+
+P="$(tput setaf 7)$(tput bold)[$(tput setaf 2)+$(tput setaf 7)]$(tput sgr0)"
+F="$(tput setaf 7)$(tput bold)[$(tput setaf 1)!$(tput setaf 7)]$(tput sgr0)"
+
+PURPOSE="Search Breach Compilation Data and Create User/Password Lists\n  * Creates 'bcdata' directory in current working directory."
+USAGE="recon-breach-data-search <client.com>"
+DATA_FORMAT="N/A"
+##
+
+if [[ "$1" == "" || "$1" == "help" || "$1" == "h" ]]; then
+	echo -e "$PURPOSE"
+	echo -e "Data Format: $DATA_FORMAT"
+	echo -e "Usage: $USAGE"
+else
+	# Search BC Data
+	if [ ! -d $BCDATADIR ]; then
+		echo -e "${F} Breach Compilation Data Directory not Found!"
+		exit 1
+	else
+		if [ ! -d $OUT_DIR ]; then
+			mkdir $OUT_DIR
+		fi
+		echo -e "${P} Searching BreachCompilation for \"@$CLIENT_DOM\"..."
+		cd $BCDATADIR
+		./query.sh "@$CLIENT_DOM" >> $BCRAW_OUT
+        echo -e "${P} Searching COL15 for \"@$CLIENT_DOM\"..."
+        cd $COLDATADIR
+        ./query.sh "@$CLIENT_DOM" >> $BCRAW_OUT
+        echo -e "${P} Searching COMB for \"@$CLIENT_DOM\"..."
+        cd $COMBDATADIR
+        ./query.sh "@$CLIENT_DOM" >> $BCRAW_OUT
+		echo -e "${P} Search Complete. Saved to $BCRAW_OUT."
+		echo -e "${P} Creating Password List with Count..."
+		cat $BCRAW_OUT | cut -d: -f2 | sort | uniq -c | sort -nr | sed -e "s/\ \+ //g" > $PASS_LIST_WC
+		echo -e "${P} Creating Sorted Uniq Password List..."
+		cat $BCRAW_OUT | cut -d: -f2 | sort -u > $PASS_LIST_SU
+		echo -e "${P} Creating Email and Username Lists..."
+		awk -F':' '{print $1}' $BCRAW_OUT | sort -fu > $EMAIL_FILE
+		awk -F'@' '{print $1}' $BCRAW_OUT | sort -fu > $USER_FILE
+		echo -e "${P} Creating Breach Data TSV..."
+		awk -F ':' '{print $1"\t"$2}' $BCRAW_OUT | sort -o "$PASS_RPT"
+		echo -e "${P} Done. Files saved to $OUT_DIR"
+	fi
+fi
