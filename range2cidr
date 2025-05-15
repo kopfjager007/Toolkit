@@ -7,18 +7,66 @@
 # https://pypi.org/project/netaddr/
 # https://netaddr.readthedocs.io/en/latest/api.html?highlight=iprange_to_cidr#netaddr.iprange_to_cidrs
 # 
+# CHANGELOG
+# Date: 2025.05.15
+#  - Added error handling & ability to take a range instead of just a file.
+# 
 
 import sys
+import os
 import netaddr
 
-INFILE = open(sys.argv[1], 'r')
-RANGES = INFILE.readlines()
+def process_range(range_str):
+    range_str = range_str.strip()
+    if not range_str or range_str.startswith('#'):
+        # Skip empty lines or commented out lines
+        return
+        
+    try:
+        myrange = range_str.split("-")
+        start = myrange[0].strip()
 
-for range in RANGES:
-    #print("Range: " + range)
-    myrange = range.split("-")
-    start = myrange[0].rstrip()
-    stop = myrange[1].lstrip()
-    cidrs = netaddr.iprange_to_cidrs(start, stop)
-    for cidr in cidrs:
-        print(cidr)
+        # Handle single IP case
+        stop = myrange[1].strip() if len(myrange) > 1 else start
+        
+        # Validate IP addresses before processing
+        netaddr.IPAddress(start)
+        netaddr.IPAddress(stop)
+        
+        cidrs = netaddr.iprange_to_cidrs(start, stop)
+        for cidr in cidrs:
+            print(cidr)
+    except (IndexError, ValueError, netaddr.core.AddrFormatError) as e:
+        print(f"Error processing range '{range_str}': {e}", file=sys.stderr)
+
+def print_usage():
+    print(f"Usage:")
+    print(f"  range2cidr <ip_range>     # Process a single IP range (e.g. '10.0.0.1 - 10.0.0.10')")
+    print(f"  range2cidr -f <filename>  # Process IP ranges from a file (one per line)")
+    sys.exit(1)
+
+def main():
+    if len(sys.argv) < 2:
+        print_usage()
+    
+    # Handle file input with -f flag
+    if sys.argv[1] == "-f":
+        if len(sys.argv) != 3:
+            print_usage()
+        
+        filename = sys.argv[2]
+        if not os.path.isfile(filename):
+            print(f"Error: File '{filename}' not found.", file=sys.stderr)
+            sys.exit(1)
+            
+        with open(filename, 'r') as infile:
+            for line in infile:
+                process_range(line)
+    
+    # Handle direct range input
+    else:
+        # Join all args to handle any spaces in a range
+        process_range(" ".join(sys.argv[1:]))
+
+if __name__ == "__main__":
+    main()
